@@ -17,7 +17,7 @@
 ## 📋 TODO
 - [ ] If you find PersonaLive useful or interesting, please give us a Star🌟! Your support drives us to keep improving.
 - [ ] Fix bugs (If you encounter any issues, please feel free to open an issue or contact me! 🙏)
-- [ ] Release `training code`.
+- [x] Release `training code`.
 - [x] **[2026.02.21]** 🥳 PersonaLive is accepted by CVPR2026 🎉.
 - [x] **[2025.12.29]** 🔥 Enhance WebUI (Support reference image replacement).
 - [x] **[2025.12.22]** 🔥 Supported streaming strategy in offline inference to generate long videos on 12GB VRAM!
@@ -129,6 +129,9 @@ Converting the model to TensorRT can significantly speed up inference (~ 2x ⚡�
 ```
 # Install packages with pip
 pip install -r requirements_trt.txt
+
+# src/models/motion_encoder/FAN_temporal_feature_extractor.py
+self.pos_embed.pos_embed.requires_grad = False
 
 # Converting the model to TensorRT
 python torch2trt.py
