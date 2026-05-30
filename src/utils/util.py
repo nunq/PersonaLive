@@ -396,6 +396,9 @@ def get_boxes(keypoints, height=512, width=512):
 
     return boxes
 
+FACE_CROP_SCALE = 1.1
+
+
 def crop_face(image_pil, face_mesh):
     image = np.array(image_pil)
     h, w = image.shape[:2]
@@ -407,7 +410,7 @@ def crop_face(image_pil, face_mesh):
     x2, y2 = max(xs), max(ys)
     face_box = (x1, y1, x2, y2)
 
-    left, top, right, bot = scale_bb(face_box, scale=1.1, size=image.shape[:2])
+    left, top, right, bot = scale_bb(face_box, scale=FACE_CROP_SCALE, size=image.shape[:2])
 
     face_patch = image[int(top) : int(bot), int(left) : int(right)]
 

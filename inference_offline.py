@@ -35,10 +35,21 @@ def parse_args():
     parser.add_argument("-L", type=int, default=100)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", type=str, default="cuda")
-    parser.add_argument("--use_xformers", type=bool, default=True)
-    parser.add_argument("--stream_gen", type=bool, default=True, help='use streaming generation strategy to reduce VRAM usage.')
+    parser.add_argument('--use-xformers', dest='use_xformers', action='store_true', default=True)
+    parser.add_argument('--no-use-xformers', dest='use_xformers', action='store_false')
+    parser.add_argument('--stream-gen', dest='stream_gen', action='store_true', default=False)
+    parser.add_argument('--no-stream-gen', dest='stream_gen', action='store_false', help='disable streaming for higher-quality offline renders')
     parser.add_argument("--reference_image", type=str, default='', help='Path to reference image. If provided, overrides test_cases from config.')
     parser.add_argument("--driving_video", type=str, default='', help='Path to driving video. If provided, overrides test_cases from config.')
+    parser.add_argument("--num_inference_steps", type=int, default=4)
+    parser.add_argument("--guidance_scale", type=float, default=1.0)
+    parser.add_argument("--crf", type=int, default=18)
+    parser.add_argument("--temporal_window_size", type=int, default=4)
+    parser.add_argument("--temporal_adaptive_step", type=int, default=4)
+    parser.add_argument('--fp32', action='store_true', default=False)
+    parser.add_argument('--temporal-kv-cache', dest='temporal_kv_cache', action='store_true', default=False)
+    parser.add_argument('--no-temporal-kv-cache', dest='temporal_kv_cache', action='store_false')
+    parser.add_argument('--face-crop-scale', type=float, default=1.1)
     args = parser.parse_args()
 
     return args
@@ -48,7 +59,9 @@ def main(args):
     print('device', device)
     config = OmegaConf.load(args.config)
 
-    if config.weight_dtype == "fp16":
+    if getattr(args, 'fp32', False):
+        weight_dtype = torch.float32
+    elif config.weight_dtype == "fp16":
         weight_dtype = torch.float16
     else:
         weight_dtype = torch.float32
@@ -134,6 +147,9 @@ def main(args):
                 print("Failed to enable xformers:", e)
         else:
             print("xformers is not available. Make sure it is installed correctly.")
+
+    import src.utils.util as pl_util
+    pl_util.FACE_CROP_SCALE = args.face_crop_scale
 
     mp_face_mesh = mp.solutions.face_mesh
     face_mesh = mp_face_mesh.FaceMesh(static_image_mode=True, max_num_faces=1)
@@ -234,6 +250,7 @@ def main(args):
             ori_pose_tensor = torch.stack(ori_pose_tensor_list, dim=0)  # (f, c, h, w)
             ori_pose_tensor = ori_pose_tensor.transpose(0, 1).unsqueeze(0)
 
+            timesteps_list = np.linspace(999, 0, args.num_inference_steps, dtype=int).tolist()
             gen_video = pipe(
                 ori_pose_images,
                 ref_image_pil,
@@ -242,11 +259,13 @@ def main(args):
                 width,
                 height,
                 len(dri_faces),
-                num_inference_steps=4,
-                guidance_scale=1.0,
+                num_inference_steps=args.num_inference_steps,
+                guidance_scale=args.guidance_scale,
                 generator=generator,
-                temporal_window_size = 4,
-                temporal_adaptive_step = 4,
+                temporal_window_size=args.temporal_window_size,
+                temporal_adaptive_step=args.temporal_adaptive_step,
+                timesteps_list=timesteps_list,
+                temporal_kv_cache=args.temporal_kv_cache,
             ).videos
 
             #Concat it with pose tensor
@@ -261,7 +280,7 @@ def main(args):
 
             if True:
                 save_vid_path = save_vid_path.replace(save_vid_dir, save_split_vid_dir)
-                save_videos_grid(gen_video, save_vid_path, n_rows=1, fps=25, crf=18, audio_source=pose_video_path)
+                save_videos_grid(gen_video, save_vid_path, n_rows=1, fps=25, crf=args.crf, audio_source=pose_video_path)
 
 if __name__ == "__main__":
     args = parse_args()
