@@ -399,22 +399,24 @@ def get_boxes(keypoints, height=512, width=512):
 FACE_CROP_SCALE = 1.1
 
 
-def crop_face(image_pil, face_mesh):
+def crop_face(image_pil, face_mesh, fallback_box=None, scale=FACE_CROP_SCALE):
     image = np.array(image_pil)
     h, w = image.shape[:2]
     results = face_mesh.process(image)
-    face_landmarks = results.multi_face_landmarks[0]
-    coords = [(int(l.x * w), int(l.y * h)) for l in face_landmarks.landmark]
-    xs, ys = zip(*coords)
-    x1, y1 = min(xs), min(ys)
-    x2, y2 = max(xs), max(ys)
-    face_box = (x1, y1, x2, y2)
 
-    left, top, right, bot = scale_bb(face_box, scale=FACE_CROP_SCALE, size=image.shape[:2])
+    if results.multi_face_landmarks:
+        face_landmarks = results.multi_face_landmarks[0]
+        coords = [(int(l.x * w), int(l.y * h)) for l in face_landmarks.landmark]
+        xs, ys = zip(*coords)
+        face_box = (min(xs), min(ys), max(xs), max(ys))
+    elif fallback_box is not None:
+        face_box = fallback_box
+    else:
+        raise ValueError("no face detected in frame and no fallback box available")
 
+    left, top, right, bot = scale_bb(face_box, scale=scale, size=image.shape[:2])
     face_patch = image[int(top) : int(bot), int(left) : int(right)]
-
-    return face_patch
+    return face_patch, face_box
 
 def scale_bb(bbox, scale, size):
     left, top, right, bot = bbox

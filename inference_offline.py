@@ -50,6 +50,7 @@ def parse_args():
     parser.add_argument('--temporal-kv-cache', dest='temporal_kv_cache', action='store_true', default=False)
     parser.add_argument('--no-temporal-kv-cache', dest='temporal_kv_cache', action='store_false')
     parser.add_argument('--face-crop-scale', type=float, default=1.1)
+    parser.add_argument('--save-debug-grid', action='store_true', default=False)
     args = parser.parse_args()
 
     return args
@@ -216,7 +217,9 @@ def main(args):
             control = control.get_batch([sel_idx]).asnumpy() # N, H, W, C
 
             ref_image_pil = ref_img.copy()
-            ref_patch = crop_face(ref_image_pil, face_mesh)
+            ref_patch, last_face_box = crop_face(
+                ref_image_pil, face_mesh, scale=args.face_crop_scale
+            )
             ref_face_pil = Image.fromarray(ref_patch).convert("RGB")
 
             size = args.H
@@ -228,27 +231,14 @@ def main(args):
             for idx_control, pose_image_pil in tqdm(enumerate(control[:video_length]), total=video_length, desc='cropping faces'):
                 pose_image_pil = Image.fromarray(pose_image_pil).convert("RGB")
                 ori_pose_images.append(pose_image_pil)
-                dri_face = crop_face(pose_image_pil, face_mesh)
+                dri_face, last_face_box = crop_face(
+                    pose_image_pil,
+                    face_mesh,
+                    fallback_box=last_face_box,
+                    scale=args.face_crop_scale,
+                )
                 dri_face_pil = Image.fromarray(dri_face).convert("RGB")
                 dri_faces.append(dri_face_pil)
-
-            face_tensor_list = []
-            ori_pose_tensor_list = []
-            ref_tensor_list = []
-
-            for idx, pose_image_pil in enumerate(ori_pose_images):
-                face_tensor_list.append(pose_transform(dri_faces[idx]))
-                ori_pose_tensor_list.append(pose_transform(pose_image_pil))
-                ref_tensor_list.append(pose_transform(ref_image_pil))
-
-            ref_tensor = torch.stack(ref_tensor_list, dim=0)  # (f, c, h, w)
-            ref_tensor = ref_tensor.transpose(0, 1).unsqueeze(0)  # (c, f, h, w)
-
-            face_tensor = torch.stack(face_tensor_list, dim=0)  # (f, c, h, w)
-            face_tensor = face_tensor.transpose(0, 1).unsqueeze(0)
-
-            ori_pose_tensor = torch.stack(ori_pose_tensor_list, dim=0)  # (f, c, h, w)
-            ori_pose_tensor = ori_pose_tensor.transpose(0, 1).unsqueeze(0)
 
             timesteps_list = np.linspace(999, 0, args.num_inference_steps, dtype=int).tolist()
             gen_video = pipe(
@@ -268,19 +258,30 @@ def main(args):
                 temporal_kv_cache=args.temporal_kv_cache,
             ).videos
 
-            #Concat it with pose tensor
-            video = torch.cat([ref_tensor, face_tensor, ori_pose_tensor, gen_video], dim=0)
+            split_save_vid_path = save_vid_path.replace(save_vid_dir, save_split_vid_dir)
+            save_videos_grid(gen_video, split_save_vid_path, n_rows=1, fps=25, crf=args.crf, audio_source=pose_video_path)
 
-            save_videos_grid(
-                video,
-                save_vid_path,
-                n_rows=4,
-                fps=25,
-            )
+            if args.save_debug_grid:
+                face_tensor_list = []
+                ori_pose_tensor_list = []
+                ref_tensor_list = []
 
-            if True:
-                save_vid_path = save_vid_path.replace(save_vid_dir, save_split_vid_dir)
-                save_videos_grid(gen_video, save_vid_path, n_rows=1, fps=25, crf=args.crf, audio_source=pose_video_path)
+                for idx, pose_image_pil in enumerate(ori_pose_images):
+                    face_tensor_list.append(pose_transform(dri_faces[idx]))
+                    ori_pose_tensor_list.append(pose_transform(pose_image_pil))
+                    ref_tensor_list.append(pose_transform(ref_image_pil))
+
+                ref_tensor = torch.stack(ref_tensor_list, dim=0)
+                ref_tensor = ref_tensor.transpose(0, 1).unsqueeze(0)
+
+                face_tensor = torch.stack(face_tensor_list, dim=0)
+                face_tensor = face_tensor.transpose(0, 1).unsqueeze(0)
+
+                ori_pose_tensor = torch.stack(ori_pose_tensor_list, dim=0)
+                ori_pose_tensor = ori_pose_tensor.transpose(0, 1).unsqueeze(0)
+
+                video = torch.cat([ref_tensor, face_tensor, ori_pose_tensor, gen_video], dim=0)
+                save_videos_grid(video, save_vid_path, n_rows=4, fps=25)
 
 if __name__ == "__main__":
     args = parse_args()
