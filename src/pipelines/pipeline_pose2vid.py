@@ -770,6 +770,7 @@ class Pose2VideoPipeline_Stream(Pose2VideoPipeline):
         temporal_adaptive_step = 4,
         temporal_kv_cache=True,
         init_latents=None,
+        timesteps_list=None,
         **kwargs,
     ):
         assert num_inference_steps % temporal_adaptive_step == 0, "temporal_adaptive_step should be divisor of num_inference_steps"
@@ -781,8 +782,13 @@ class Pose2VideoPipeline_Stream(Pose2VideoPipeline):
         device = self._execution_device
 
         # Prepare timesteps
-        timesteps = torch.tensor([999, 666, 333, 0], device=device).long()
-        self.scheduler.set_step_length(333)
+        if timesteps_list is not None:
+            assert len(timesteps_list) == num_inference_steps, 'len(timesteps_list) != num_inference_steps'
+            timesteps = torch.tensor(timesteps_list, device=device).long()
+            self.scheduler.set_step_length(timesteps_list[0]-timesteps_list[1])
+        else:
+            timesteps = torch.tensor([999, 666, 333, 0], device=device).long()
+            self.scheduler.set_step_length(333)
         jump = num_inference_steps // temporal_adaptive_step
         windows = video_length // temporal_window_size
 
@@ -909,7 +915,7 @@ class Pose2VideoPipeline_Stream(Pose2VideoPipeline):
                 latents = self.scheduler.add_noise(latents, noise, timesteps[:1])
 
                 latents = torch.cat([noise_latents, latents], dim=2)
-                latents_model_input = latents
+                latents_model_input = latents.to(dtype=self.denoising_unet.dtype)
 
                 for j in range(jump):
                     ut = reversed(timesteps[j::jump]).repeat_interleave(temporal_window_size, dim=0)
@@ -917,7 +923,7 @@ class Pose2VideoPipeline_Stream(Pose2VideoPipeline):
                     ut = rearrange(ut, 'b f -> (b f)')
 
                     noise_pred = self.denoising_unet(
-                        latents_model_input,
+                        latents_model_input.to(dtype=self.denoising_unet.dtype),
                         ut,
                         encoder_hidden_states=[
                             image_prompt_embeds,
@@ -935,7 +941,9 @@ class Pose2VideoPipeline_Stream(Pose2VideoPipeline):
                         mid_noise_pred, ut, mid_latents, **extra_step_kwargs, return_dict=False
                     )
                     latents_model_input = rearrange(latents_model_input, '(b f) c h w -> b c f h w', f=clip_length)
+                    latents_model_input = latents_model_input.to(dtype=self.denoising_unet.dtype)
                     pred_original_sample = rearrange(pred_original_sample, '(b f) c h w -> b c f h w', f=clip_length)
+                    pred_original_sample = pred_original_sample.to(dtype=self.denoising_unet.dtype)
 
                 noise_latents = latents_model_input[:,:,temporal_window_size:].to(dtype=self.dtype)
 
